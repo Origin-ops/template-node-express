@@ -1,3 +1,4 @@
+// src/app.ts
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { RequestListener } from "node:http";
@@ -11,6 +12,7 @@ import { getClientIp } from "request-ip";
 import * as ev from "express-validator";
 
 import { Config } from "./config";
+import { twilioVoiceWebhookRouter } from "./routes/twilioVoiceWebhook";
 
 export type App = {
   requestListener: RequestListener;
@@ -35,17 +37,13 @@ type Store = {
 
 const asl = new AsyncLocalStorage<Store>();
 
-export function makeValidationMiddleware(
-  runners: ev.ContextRunner[],
-): RequestHandler {
+export function makeValidationMiddleware(runners: ev.ContextRunner[]): RequestHandler {
   return async function (req: Request, res: Response, next: NextFunction) {
     await Promise.all(runners.map((runner) => runner.run(req)));
 
     const errors = ev.validationResult(req);
     if (!errors.isEmpty()) {
-      res.status(400).json({
-        errors: errors.array(),
-      });
+      res.status(400).json({ errors: errors.array() });
       return;
     }
 
@@ -56,6 +54,9 @@ export function makeValidationMiddleware(
 export const initApp = async (config: Config, logger: pino.Logger): Promise<App> => {
   const app = express();
   app.set("trust proxy", true);
+
+  // ✅ Needed for Twilio webhooks (application/x-www-form-urlencoded)
+  app.use(express.urlencoded({ extended: false }));
 
   // Raw parser for non-JSON payloads
   app.use(
@@ -81,10 +82,8 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
     req.abortSignal = ac.signal;
     res.on("close", () => ac.abort());
 
-    // NOTE: Express headers can be string|string[]; handle both safely
     const hdr = req.headers["x-request-id"];
-    const requestId =
-      (Array.isArray(hdr) ? hdr[0] : hdr) || randomUUID();
+    const requestId = (Array.isArray(hdr) ? hdr[0] : hdr) || randomUUID();
 
     const l = logger.child({ requestId });
 
@@ -100,13 +99,17 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
     // Track bytes written
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (res as any).write = function (chunk: any, ...rest: any[]) {
-      if (chunk) bytesWritten += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk));
+      if (chunk) {
+        bytesWritten += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk));
+      }
       return oldWrite(chunk, ...rest);
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (res as any).end = function (chunk?: any, ...rest: any[]) {
-      if (chunk) bytesWritten += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk));
+      if (chunk) {
+        bytesWritten += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk));
+      }
       return oldEnd(chunk, ...rest);
     };
 
@@ -132,12 +135,15 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
   app.use(helmet());
   app.use(compression());
 
-  // ✅ Add a friendly root route so the browser doesn't show "Cannot GET /"
+  // ✅ Mount Twilio routes
+  app.use("/twilio", twilioVoiceWebhookRouter);
+
+  // Friendly root route
   app.get("/", (req: Request, res: Response) => {
     res.status(200).send("Backend is running 🚀");
   });
 
-  // ✅ Add a simple health route (in addition to config.healthCheckEndpoint)
+  // Simple health route
   app.get("/health", (req: Request, res: Response) => {
     res.status(200).json({ status: "ok" });
   });
@@ -191,9 +197,7 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
   // Error handler
   app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
     asl.getStore()?.logger.error(err);
-
     if (res.headersSent) return;
-
     res.status(500).json({ msg: "Something went wrong" });
   });
 
