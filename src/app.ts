@@ -47,6 +47,12 @@ export const initApp = async (
         express.json({
             limit: '50kb',
             type: (req) => {
+                app.get("/", (req, res) => {
+                    res.send("Backend is running 🚀");
+                });
+                app.get("/health", (req, res) => {
+                    res.json({ status: "ok" });
+                });
                 return (
                     req.headers['content-type'] === APPLICATION_JSON &&
                     req.url !== LARGE_JSON_PATH
