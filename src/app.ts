@@ -12,7 +12,7 @@ import { getClientIp } from "request-ip";
 import * as ev from "express-validator";
 
 import { Config } from "./config";
-import { twilioVoiceWebhookRouter } from "./routes/twilioVoiceWebhook";
+import { twilioVoiceWebhookRouter } from "./src/routes/twilioVoiceWebhook";
 
 export type App = {
   requestListener: RequestListener;
