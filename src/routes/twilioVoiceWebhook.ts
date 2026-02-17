@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import twilio from "twilio"; // Node package (already in your deps if you used it before)
+import twilio from "twilio";
 
 // Router export
 export const twilioVoiceWebhookRouter = Router();
@@ -26,18 +26,19 @@ function buildTwiml(
     ? `${recordingCallbackBase}?call_record_id=${encodeURIComponent(callRecordId)}`
     : recordingCallbackBase;
 
+  // ✅ IMPORTANT: do NOT set Dial action=... to call-status, because action expects TwiML.
+  // We'll use <Number statusCallback=...> for status updates instead.
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Dial callerId="${esc(callerId)}"
         record="record-from-answer"
         recordingStatusCallback="${esc(recordingCallbackUrl)}"
         recordingStatusCallbackMethod="POST"
-        action="${esc(statusCallbackUrl)}"
-        method="POST"
         answerOnBridge="true"
         timeout="30">
     <Number statusCallback="${esc(statusCallbackUrl)}"
-            statusCallbackMethod="POST">
+            statusCallbackMethod="POST"
+            statusCallbackEvent="initiated ringing answered completed">
       ${esc(number)}
     </Number>
   </Dial>
@@ -74,7 +75,6 @@ function normalizeNumber(n: unknown) {
  */
 twilioVoiceWebhookRouter.post("/voice-webhook", async (req: Request, res: Response) => {
   try {
-    // --- Required config ---
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     if (!authToken) {
       console.error("twilioVoiceWebhook: Missing TWILIO_AUTH_TOKEN");
@@ -87,7 +87,7 @@ twilioVoiceWebhookRouter.post("/voice-webhook", async (req: Request, res: Respon
       return twimlSay(res, "Server configuration error.");
     }
 
-    // --- Params (express.urlencoded must be enabled in your app) ---
+    // Params (requires express.urlencoded({extended:false}) in app.ts)
     const params: Record<string, any> = req.body || {};
 
     // Debug incoming
@@ -101,7 +101,7 @@ twilioVoiceWebhookRouter.post("/voice-webhook", async (req: Request, res: Respon
       });
     } catch (_) {}
 
-    // --- Signature validation ---
+    // Signature validation
     const skipSig =
       (process.env.TWILIO_SKIP_SIGNATURE_VALIDATION || "").toLowerCase() === "true" ||
       process.env.TWILIO_SKIP_SIGNATURE_VALIDATION === "1";
@@ -109,8 +109,7 @@ twilioVoiceWebhookRouter.post("/voice-webhook", async (req: Request, res: Respon
     if (!skipSig) {
       const sigHeader = req.header("X-Twilio-Signature") || "";
 
-      // IMPORTANT: validate against a fixed public URL if provided.
-      // This prevents proxy/host mismatch issues.
+      // Validate against a fixed public URL if provided (recommended)
       const validationUrl =
         (process.env.TWILIO_WEBHOOK_URL || "").trim() ||
         `${req.protocol}://${req.get("host")}${req.originalUrl.split("?")[0]}`;
@@ -127,7 +126,7 @@ twilioVoiceWebhookRouter.post("/voice-webhook", async (req: Request, res: Respon
       }
     }
 
-    // --- Determine destination number ---
+    // Determine destination number
     const rawTo =
       params.To ||
       params.to ||
@@ -145,8 +144,7 @@ twilioVoiceWebhookRouter.post("/voice-webhook", async (req: Request, res: Respon
       return twimlSay(res, "Missing destination number.");
     }
 
-    // --- Build callback URLs ---
-    // Use a fixed base in Railway so Twilio always calls Railway (not base44/deno)
+    // Build callback URLs (fixed Railway base)
     const base =
       (process.env.TWILIO_WEBHOOK_BASE_URL || "").trim().replace(/\/+$/, "") ||
       "https://node-express-production-24b9.up.railway.app/twilio";
@@ -154,11 +152,16 @@ twilioVoiceWebhookRouter.post("/voice-webhook", async (req: Request, res: Respon
     const statusCallbackUrl = `${base}/call-status`;
     const recordingCallbackUrl = `${base}/recording-status`;
 
-    // --- Return TwiML ---
+    // Return TwiML
     const twimlXml = buildTwiml(toNumber, callerId, statusCallbackUrl, recordingCallbackUrl, callRecordId);
 
     try {
-      console.log("twilioVoiceWebhook: TwiML callbacks", { statusCallbackUrl, recordingCallbackUrl, toNumber, callRecordId });
+      console.log("twilioVoiceWebhook: TwiML callbacks", {
+        statusCallbackUrl,
+        recordingCallbackUrl,
+        toNumber,
+        callRecordId,
+      });
     } catch (_) {}
 
     return res.status(200).type("text/xml").send(twimlXml);
