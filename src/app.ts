@@ -14,6 +14,7 @@ import * as ev from "express-validator";
 import { Config } from "./config";
 import { twilioVoiceWebhookRouter } from "./routes/twilioVoiceWebhook";
 import { twilioCallStatusRouter } from "./routes/twilioCallStatus";
+import { twilioRecordingStatusRouter } from "./routes/twilioRecordingStatus";
 
 export type App = {
   requestListener: RequestListener;
@@ -139,6 +140,7 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
   // ✅ Mount Twilio routes
   app.use("/twilio", twilioVoiceWebhookRouter);
   app.use("/twilio", twilioCallStatusRouter);
+  app.use("/twilio", twilioRecordingStatusRouter);
 
   // Friendly root route
   app.get("/", (req: Request, res: Response) => {
