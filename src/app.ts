@@ -64,27 +64,35 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
      ✅ CORS (SAFE FOR BROWSER + TWILIO)
      ============================== */
 
-  const ALLOWED_ORIGINS = new Set([
-    "https://crm-originhi.base44.app",
-  ]);
+const ALLOWED_ORIGINS = new Set([
+  "https://crm-originhi.base44.app",
+  "https://base44.app",
+]);
 
-  app.use(
-    cors({
-      origin: (origin, cb) => {
-        // No Origin header = server-to-server (Twilio) → allow
-        if (!origin) return cb(null, true);
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      // Twilio / server-to-server requests often have no Origin
+      if (!origin) return cb(null, true);
 
-        if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
+      // Some environments send literal "null"
+      if (origin === "null") return cb(null, true);
 
-        return cb(new Error(`CORS blocked for origin: ${origin}`));
-      },
-      credentials: true,
-      methods: ["GET", "POST", "HEAD", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization", "Range"],
-      exposedHeaders: ["Content-Range", "Accept-Ranges"],
-      maxAge: 600,
-    })
-  );
+      if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
+
+      // IMPORTANT: do NOT throw an error (prevents random 500s)
+      return cb(null, false);
+    },
+    credentials: true,
+    methods: ["GET", "POST", "HEAD", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "Range"],
+    exposedHeaders: ["Content-Range", "Accept-Ranges"],
+    maxAge: 600,
+  })
+);
+
+app.options("*", cors());
+
 
   // Explicitly handle preflight
   app.options("*", cors());
