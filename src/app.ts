@@ -67,6 +67,7 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
 const ALLOWED_ORIGINS = new Set([
   "https://crm-originhi.base44.app",
   "https://base44.app",
+  "https://crm-originhi.co.uk",
 ]);
 
 app.use(
