@@ -7,6 +7,7 @@ import express, { NextFunction, Request, RequestHandler, Response } from "expres
 import "express-async-errors";
 import pino from "pino";
 import helmet from "helmet";
+import cors from "cors";
 import compression from "compression";
 import { getClientIp } from "request-ip";
 import * as ev from "express-validator";
@@ -17,7 +18,6 @@ import { twilioCallStatusRouter } from "./routes/twilioCallStatus";
 import { twilioRecordingStatusRouter } from "./routes/twilioRecordingStatus";
 import { twilioGenerateTokenRouter } from "./routes/twilioGenerateToken";
 import { streamCallRecordingRouter } from "./routes/streamCallRecording";
-
 
 export type App = {
   requestListener: RequestListener;
@@ -60,7 +60,40 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
   const app = express();
   app.set("trust proxy", true);
 
-  // ✅ Needed for Twilio webhooks (application/x-www-form-urlencoded)
+  /* ==============================
+     ✅ CORS (SAFE FOR BROWSER + TWILIO)
+     ============================== */
+
+  const ALLOWED_ORIGINS = new Set([
+    "https://crm-originhi.base44.app",
+  ]);
+
+  app.use(
+    cors({
+      origin: (origin, cb) => {
+        // No Origin header = server-to-server (Twilio) → allow
+        if (!origin) return cb(null, true);
+
+        if (ALLOWED_ORIGINS.has(origin)) return cb(null, true);
+
+        return cb(new Error(`CORS blocked for origin: ${origin}`));
+      },
+      credentials: true,
+      methods: ["GET", "POST", "HEAD", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "Range"],
+      exposedHeaders: ["Content-Range", "Accept-Ranges"],
+      maxAge: 600,
+    })
+  );
+
+  // Explicitly handle preflight
+  app.options("*", cors());
+
+  /* ==============================
+     ✅ BODY PARSERS
+     ============================== */
+
+  // Needed for Twilio webhooks (form posts)
   app.use(express.urlencoded({ extended: false }));
 
   // Raw parser for non-JSON payloads
@@ -68,19 +101,23 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
     express.raw({
       limit: "1kb",
       type: (req) => req.headers["content-type"] !== APPLICATION_JSON,
-    }),
+    })
   );
 
-  // JSON parser for normal JSON payloads (except the large-json path)
+  // JSON parser (except large-json path)
   app.use(
     express.json({
       limit: "50kb",
       type: (req) =>
-        req.headers["content-type"] === APPLICATION_JSON && req.url !== LARGE_JSON_PATH,
-    }),
+        req.headers["content-type"] === APPLICATION_JSON &&
+        req.url !== LARGE_JSON_PATH,
+    })
   );
 
-  // Request context + logging + abort signal propagation
+  /* ==============================
+     ✅ LOGGING + CONTEXT
+     ============================== */
+
   app.use((req: Request, res: Response, next: NextFunction) => {
     const start = Date.now();
     const ac = new AbortController();
@@ -89,7 +126,6 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
 
     const hdr = req.headers["x-request-id"];
     const requestId = (Array.isArray(hdr) ? hdr[0] : hdr) || randomUUID();
-
     const l = logger.child({ requestId });
 
     let bytesRead = 0;
@@ -101,19 +137,20 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
     const oldWrite = res.write.bind(res);
     const oldEnd = res.end.bind(res);
 
-    // Track bytes written
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (res as any).write = function (chunk: any, ...rest: any[]) {
       if (chunk) {
-        bytesWritten += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk));
+        bytesWritten += Buffer.isBuffer(chunk)
+          ? chunk.length
+          : Buffer.byteLength(String(chunk));
       }
       return oldWrite(chunk, ...rest);
     };
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (res as any).end = function (chunk?: any, ...rest: any[]) {
       if (chunk) {
-        bytesWritten += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk));
+        bytesWritten += Buffer.isBuffer(chunk)
+          ? chunk.length
+          : Buffer.byteLength(String(chunk));
       }
       return oldEnd(chunk, ...rest);
     };
@@ -130,7 +167,7 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
           br: bytesRead,
           bw: bytesWritten,
         },
-        "Request handled",
+        "Request handled"
       );
     });
 
@@ -140,29 +177,33 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
   app.use(helmet());
   app.use(compression());
 
-  // ✅ Mount Twilio routes
+  /* ==============================
+     ✅ TWILIO ROUTES
+     ============================== */
+
   app.use("/twilio", twilioVoiceWebhookRouter);
   app.use("/twilio", twilioCallStatusRouter);
   app.use("/twilio", twilioRecordingStatusRouter);
   app.use("/twilio", twilioGenerateTokenRouter);
   app.use("/twilio", streamCallRecordingRouter);
 
-  // Friendly root route
-  app.get("/", (req: Request, res: Response) => {
+  /* ==============================
+     ✅ BASIC ROUTES
+     ============================== */
+
+  app.get("/", (_req: Request, res: Response) => {
     res.status(200).send("Backend is running 🚀");
   });
 
-  // Simple health route
-  app.get("/health", (req: Request, res: Response) => {
+  app.get("/health", (_req: Request, res: Response) => {
     res.status(200).json({ status: "ok" });
   });
 
-  // Existing configured health check endpoint
-  app.get(config.healthCheckEndpoint, (req: Request, res: Response) => {
+  app.get(config.healthCheckEndpoint, (_req: Request, res: Response) => {
     res.sendStatus(200);
   });
 
-  app.get("/hi", (req: Request, res: Response) => {
+  app.get("/hi", (_req: Request, res: Response) => {
     const s = asl.getStore();
     s?.logger.info("hi");
     res.send("hi");
@@ -173,38 +214,22 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
     makeValidationMiddleware([ev.body("name").notEmpty()]),
     (req: Request, res: Response) => {
       res.json({ msg: `hi ${req.body.name}` });
-    },
+    }
   );
 
   app.post(
     LARGE_JSON_PATH,
     express.json({ limit: "5mb", type: APPLICATION_JSON }),
-    (req: Request, res: Response) => {
-      // TODO: handle large json payload
+    (_req: Request, res: Response) => {
       res.end();
-    },
+    }
   );
 
-  app.get("/abort-signal-propagation", async (req: Request, res: Response) => {
-    for (let i = 0; i < 10; i++) {
-      await new Promise((r) => setTimeout(r, 25));
-      if (req.abortSignal.aborted) throw new Error("aborted");
-    }
+  /* ==============================
+     ✅ ERROR HANDLER
+     ============================== */
 
-    const usersRes = await fetch("https://jsonplaceholder.typicode.com/users", {
-      signal: req.abortSignal,
-    });
-
-    if (usersRes.status !== 200) {
-      throw new Error(`unexpected non-200 status code ${usersRes.status}`);
-    }
-
-    const users = await usersRes.json();
-    res.json(users);
-  });
-
-  // Error handler
-  app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     asl.getStore()?.logger.error(err);
     if (res.headersSent) return;
     res.status(500).json({ msg: "Something went wrong" });
@@ -212,8 +237,6 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
 
   return {
     requestListener: app,
-    shutdown: async () => {
-      // add any cleanup code here including database/redis disconnecting and background job shutdown
-    },
+    shutdown: async () => {},
   };
 };
