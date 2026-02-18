@@ -43,9 +43,9 @@ twilioGenerateTokenRouter.post("/generate-token", async (req: Request, res: Resp
     const VoiceGrant = AccessToken.VoiceGrant;
 
     const token = new AccessToken(
-      accountSid,
-      apiKeySid,
-      apiKeySecret,
+  process.env.TWILIO_ACCOUNT_SID!,
+  process.env.TWILIO_API_KEY_SID!,
+  process.env.TWILIO_API_KEY_SECRET!,
       {
         identity,
         ttl: 3600,
