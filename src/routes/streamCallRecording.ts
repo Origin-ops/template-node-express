@@ -1,4 +1,4 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response as ExpressResponse } from "express";
 
 export const streamCallRecordingRouter = Router();
 
@@ -13,11 +13,14 @@ function base64UrlToString(input: string) {
 }
 
 /**
- * HMAC verify where the signed message is the *payloadB64* string (exactly like your Deno code)
+ * HMAC verify where the signed message is the *payloadB64* string
  */
 function hmacVerify(secret: string, payloadB64: string, sigB64: string) {
   const crypto = require("node:crypto") as typeof import("node:crypto");
-  const mac = crypto.createHmac("sha256", secret).update(payloadB64, "utf8").digest("base64");
+  const mac = crypto
+    .createHmac("sha256", secret)
+    .update(payloadB64, "utf8")
+    .digest("base64");
   const calc = mac.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
   return calc === sigB64;
 }
@@ -25,11 +28,17 @@ function hmacVerify(secret: string, payloadB64: string, sigB64: string) {
 /**
  * CORS helper
  */
-function applyCors(res: Response) {
+function applyCors(res: ExpressResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type, Authorization");
-  res.setHeader("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Range, Content-Type, Authorization",
+  );
+  res.setHeader(
+    "Access-Control-Expose-Headers",
+    "Content-Range, Accept-Ranges",
+  );
 }
 
 async function base44LoginAndGetCall(callId: string) {
@@ -40,7 +49,6 @@ async function base44LoginAndGetCall(callId: string) {
     throw new Error("Base44 service role credentials not configured");
   }
 
-  // These endpoints match Base44 patterns you’ve already used.
   const base = "https://base44.app";
 
   // 1) Login
@@ -62,13 +70,16 @@ async function base44LoginAndGetCall(callId: string) {
   }
 
   // 2) Fetch Call entity by id
-  const callRes = await fetch(`${base}/api/apps/${appId}/entities/Call/${encodeURIComponent(callId)}`, {
-    method: "GET",
-    headers: {
-      authorization: `Bearer ${token}`,
-      accept: "application/json",
+  const callRes = await fetch(
+    `${base}/api/apps/${appId}/entities/Call/${encodeURIComponent(callId)}`,
+    {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/json",
+      },
     },
-  });
+  );
 
   if (callRes.status === 404) return null;
   if (!callRes.ok) {
@@ -79,20 +90,29 @@ async function base44LoginAndGetCall(callId: string) {
   return await callRes.json().catch(() => null);
 }
 
-streamCallRecordingRouter.options("/stream-call-recording", async (_req: Request, res: Response) => {
-  applyCors(res);
-  return res.status(204).send("");
-});
+streamCallRecordingRouter.options(
+  "/stream-call-recording",
+  async (_req: Request, res: ExpressResponse) => {
+    applyCors(res);
+    return res.status(204).send("");
+  },
+);
 
-streamCallRecordingRouter.get("/stream-call-recording", async (req: Request, res: Response) => {
-  return handle(req, res);
-});
+streamCallRecordingRouter.get(
+  "/stream-call-recording",
+  async (req: Request, res: ExpressResponse) => {
+    return handle(req, res, false);
+  },
+);
 
-streamCallRecordingRouter.head("/stream-call-recording", async (req: Request, res: Response) => {
-  return handle(req, res, true);
-});
+streamCallRecordingRouter.head(
+  "/stream-call-recording",
+  async (req: Request, res: ExpressResponse) => {
+    return handle(req, res, true);
+  },
+);
 
-async function handle(req: Request, res: Response, isHead = false) {
+async function handle(req: Request, res: ExpressResponse, isHead: boolean) {
   try {
     applyCors(res);
 
@@ -112,8 +132,12 @@ async function handle(req: Request, res: Response, isHead = false) {
     }
 
     const { callId, recordingSid, twilioCallSid, exp } = payload || {};
-    if (!callId && !recordingSid) return res.status(400).json({ error: "Invalid token data" });
-    if (!exp || Date.now() > Number(exp)) return res.status(401).json({ error: "Token expired" });
+    if (!callId && !recordingSid) {
+      return res.status(400).json({ error: "Invalid token data" });
+    }
+    if (!exp || Date.now() > Number(exp)) {
+      return res.status(401).json({ error: "Token expired" });
+    }
 
     const secret =
       (process.env.RECORDING_TOKEN_SECRET || "").trim() ||
@@ -154,7 +178,6 @@ async function handle(req: Request, res: Response, isHead = false) {
         `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Recordings/${recordingSid}.wav`,
       ];
     } else if (callId) {
-      // Base44 call lookup
       let call: any = null;
       try {
         call = await base44LoginAndGetCall(String(callId));
@@ -185,7 +208,8 @@ async function handle(req: Request, res: Response, isHead = false) {
       }
 
       if (!candidates.length && call.twilio_call_sid) {
-        const listUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${call.twilio_call_sid}/Recordings.json`;
+        const listUrl =
+          `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${call.twilio_call_sid}/Recordings.json`;
         const listRes = await fetch(listUrl, { headers: { Authorization: primaryAuth } });
         if (listRes.ok) {
           const data: any = await listRes.json().catch(() => ({}));
@@ -202,7 +226,8 @@ async function handle(req: Request, res: Response, isHead = false) {
 
     // Final fallback: token includes Call SID
     if (!candidates.length && twilioCallSid) {
-      const listUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${twilioCallSid}/Recordings.json`;
+      const listUrl =
+        `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${twilioCallSid}/Recordings.json`;
       const listRes = await fetch(listUrl, { headers: { Authorization: primaryAuth } });
       if (listRes.ok) {
         const data: any = await listRes.json().catch(() => ({}));
@@ -218,7 +243,10 @@ async function handle(req: Request, res: Response, isHead = false) {
 
     if (!candidates.length) return res.status(404).json({ error: "Recording not available" });
 
-    const fetchAudio = async (urlStr: string, auth: string) => {
+    const fetchAudio = async (
+      urlStr: string,
+      auth: string,
+    ): Promise<globalThis.Response> => {
       const headers: Record<string, string> = {
         Authorization: auth,
         Accept: "audio/mpeg, audio/*",
@@ -228,12 +256,11 @@ async function handle(req: Request, res: Response, isHead = false) {
       return fetch(urlStr, { headers, redirect: "follow" });
     };
 
-    let audioRes: Response | null = null;
+    let audioRes: globalThis.Response | null = null;
     let finalUrl = "";
 
     for (const urlStr of candidates) {
       let r = await fetchAudio(urlStr, primaryAuth);
-      // If primary auth was authToken but fails, try api key auth (or vice versa)
       if ((r.status === 401 || r.status === 403) && keyBasic && authBasic) {
         r = await fetchAudio(urlStr, keyBasic);
       }
@@ -248,7 +275,6 @@ async function handle(req: Request, res: Response, isHead = false) {
       return res.status(502).json({ error: "Failed to fetch recording audio" });
     }
 
-    // Mirror Twilio headers/status for proper Range support
     const contentType =
       audioRes.headers.get("content-type") ||
       (finalUrl.endsWith(".wav") ? "audio/wav" : "audio/mpeg");
@@ -266,14 +292,14 @@ async function handle(req: Request, res: Response, isHead = false) {
 
     if (isHead) return res.end();
 
-    // Stream body
-    const body = audioRes.body as any; // Web stream
-    // Node 18+ supports Readable.fromWeb
+    // Stream body (Node 18+ supports Readable.fromWeb)
     const { Readable } = require("node:stream") as typeof import("node:stream");
-    const nodeStream = Readable.fromWeb(body);
+    const nodeStream = Readable.fromWeb(audioRes.body as any);
+
     nodeStream.on("error", () => {
       try { res.end(); } catch {}
     });
+
     nodeStream.pipe(res);
   } catch (error: any) {
     console.error("[streamCallRecording] ERROR", error?.stack || error);
