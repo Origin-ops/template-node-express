@@ -68,6 +68,7 @@ const ALLOWED_ORIGINS = new Set([
   "https://crm-originhi.base44.app",
   "https://base44.app",
   "https://crm-originhi.co.uk",
+  "https://www.crm-originhi.co.uk",
 ]);
 
 app.use(
