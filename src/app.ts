@@ -15,6 +15,7 @@ import { Config } from "./config";
 import { twilioVoiceWebhookRouter } from "./routes/twilioVoiceWebhook";
 import { twilioCallStatusRouter } from "./routes/twilioCallStatus";
 import { twilioRecordingStatusRouter } from "./routes/twilioRecordingStatus";
+import { twilioGenerateTokenRouter } from "./routes/twilioGenerateToken";
 
 export type App = {
   requestListener: RequestListener;
@@ -141,6 +142,7 @@ export const initApp = async (config: Config, logger: pino.Logger): Promise<App>
   app.use("/twilio", twilioVoiceWebhookRouter);
   app.use("/twilio", twilioCallStatusRouter);
   app.use("/twilio", twilioRecordingStatusRouter);
+  app.use("/twilio", twilioGenerateTokenRouter);
 
   // Friendly root route
   app.get("/", (req: Request, res: Response) => {
