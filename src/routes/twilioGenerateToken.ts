@@ -1,3 +1,9 @@
+console.log("Token debug", {
+  accountSid: process.env.TWILIO_ACCOUNT_SID,
+  apiKeySid: process.env.TWILIO_API_KEY_SID,
+  appSid: process.env.TWILIO_TWIML_APP_SID,
+});
+
 import { Router, Request, Response } from "express";
 import Twilio from "twilio";
 
